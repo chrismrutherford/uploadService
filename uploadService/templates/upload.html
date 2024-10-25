@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Check File</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        button {
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>File Details</h1>
+    <p>Filename: {{ filename }}</p>
+    <p>Downloads: {{ downloads }}</p>
+    <button onclick="location.href='/download/{{ uuid }}'">Download</button>
+    <button onclick="deleteFile('{{ uuid }}')">Delete</button>
+
+    <script>
+        function deleteFile(uuid) {
+            if (confirm('Are you sure you want to delete this file?')) {
+                fetch('/delete/' + uuid)
+                    .then(response => response.text())
+                    .then(result => {
+                        alert(result);
+                        window.location.href = '/';
+                    })
+                    .catch(error => console.error('Error:', error));
+            }
+        }
+    </script>
+</body>
+</html>

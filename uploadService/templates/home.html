@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload Service</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .progress-bar {
+            width: 100%;
+            background-color: #f0f0f0;
+            padding: 3px;
+            border-radius: 3px;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, .2);
+            margin-bottom: 10px;
+        }
+        .progress-bar-fill {
+            display: block;
+            height: 22px;
+            background-color: #659cef;
+            border-radius: 3px;
+            transition: width 500ms ease-in-out;
+        }
+        .progress-info {
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>File Upload Service</h1>
+    
+    <div class="section">
+        <h2>Upload Files</h2>
+        <p><strong>Note:</strong> Maximum file size is 10 GB per file.</p>
+        <form id="upload-form" enctype="multipart/form-data">
+            <input type="file" name="files[]" multiple required><br><br>
+            <label for="max_downloads">Maximum Downloads (default: 5, -1 for unlimited):</label><br>
+            <input type="number" name="max_downloads" id="max_downloads" value="5" min="-1"><br><br>
+            <button type="submit">Upload</button>
+        </form>
+        <div id="progress-bars"></div>
+        <div id="results"></div>
+    </div>
+
+    <div class="section">
+        <h2>Check File by UUID</h2>
+        <form id="check-form" action="/" method="post">
+            <input type="text" id="uuid-input" name="uuid" placeholder="Enter UUID" required>
+            <button type="submit">Check</button>
+        </form>
+    </div>
+
+    <script>
+        const form = document.getElementById('upload-form');
+        const progressBarsContainer = document.getElementById('progress-bars');
+        const resultsContainer = document.getElementById('results');
+        const uuidInput = document.getElementById('uuid-input');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(form);
+            const files = formData.getAll('files[]');
+
+            progressBarsContainer.innerHTML = '';
+            resultsContainer.innerHTML = '';
+
+            const uploads = files.map(file => {
+                if (file.size > 10 * 1024 * 1024 * 1024) {
+                    resultsContainer.innerHTML += `<p>${file.name}: File size exceeds 10 GB limit.</p>`;
+                    return null;
+                }
+
+                const progressBar = createProgressBar(file.name, file.size);
+                return uploadFile(file, progressBar);
+            });
+
+            const results = await Promise.all(uploads.filter(upload => upload !== null));
+            displayResults(results);
+        });
+
+        function createProgressBar(filename, filesize) {
+            const progressBarContainer = document.createElement('div');
+            progressBarContainer.innerHTML = `
+                <p>${filename} (${formatBytes(filesize)})</p>
+                <div class="progress-info">
+                    <span class="bytes-uploaded">0 B</span> / ${formatBytes(filesize)} |
+                    <span class="upload-speed">0 B/s</span> |
+                    <span class="time-remaining">Calculating...</span>
+                </div>
+                <div class="progress-bar">
+                    <span class="progress-bar-fill" style="width: 0;"></span>
+                </div>
+                <p class="progress-percentage">0%</p>
+            `;
+            progressBarsContainer.appendChild(progressBarContainer);
+            return progressBarContainer;
+        }
+
+        async function uploadFile(file, progressBar) {
+            const formData = new FormData();
+            formData.append('files[]', file);
+            formData.append('max_downloads', document.getElementById('max_downloads').value);
+
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/upload');
+
+                const startTime = Date.now();
+                let lastLoaded = 0;
+                let lastTime = startTime;
+
+                xhr.upload.addEventListener('progress', (event) => {
+                    if (event.lengthComputable) {
+                        const currentTime = Date.now();
+                        const elapsedTime = (currentTime - startTime) / 1000; // in seconds
+                        const bytesUploaded = event.loaded;
+                        const totalBytes = event.total;
+                        const percentComplete = (bytesUploaded / totalBytes) * 100;
+
+                        // Calculate upload speed
+                        const timeDiff = (currentTime - lastTime) / 1000; // in seconds
+                        const bytesDiff = bytesUploaded - lastLoaded;
+                        const uploadSpeed = bytesDiff / timeDiff; // bytes per second
+
+                        // Estimate remaining time
+                        const remainingBytes = totalBytes - bytesUploaded;
+                        const remainingTime = remainingBytes / uploadSpeed;
+
+                        // Update progress bar and info
+                        progressBar.querySelector('.progress-bar-fill').style.width = percentComplete + '%';
+                        progressBar.querySelector('.bytes-uploaded').textContent = formatBytes(bytesUploaded);
+                        progressBar.querySelector('.upload-speed').textContent = formatBytes(uploadSpeed) + '/s';
+                        progressBar.querySelector('.time-remaining').textContent = formatTime(remainingTime);
+                        progressBar.querySelector('.progress-percentage').textContent = percentComplete.toFixed(2) + '%';
+
+                        // Update last values for next calculation
+                        lastLoaded = bytesUploaded;
+                        lastTime = currentTime;
+                    }
+                });
+
+                xhr.onload = () => {
+                    if (xhr.status === 200) {
+                        const response = JSON.parse(xhr.responseText);
+                        resolve(response[0]);
+                    } else {
+                        reject(new Error('Upload failed'));
+                    }
+                };
+
+                xhr.onerror = () => reject(new Error('Network error'));
+
+                xhr.send(formData);
+            });
+        }
+
+        function displayResults(results) {
+            results.forEach(result => {
+                if (result.error) {
+                    resultsContainer.innerHTML += `<p>${result.filename}: ${result.error}</p>`;
+                } else {
+                    resultsContainer.innerHTML += `<p>${result.filename}: Uploaded successfully. UUID: ${result.uuid}</p>`;
+                }
+            });
+
+            if (results.length > 0 && results[0].uuid) {
+                uuidInput.value = results[0].uuid;
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatTime(seconds) {
+            if (seconds === Infinity || isNaN(seconds)) return 'Calculating...';
+            if (seconds < 1) return 'Less than a second';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            let result = '';
+            if (hours > 0) result += hours + 'h ';
+            if (minutes > 0) result += minutes + 'm ';
+            if (secs > 0) result += secs + 's';
+            return result.trim();
+        }
+    </script>
+</body>
+</html>
